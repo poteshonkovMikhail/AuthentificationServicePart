@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package auth_protobuf;
+
+message TokenRequest {
+  string user_guid = 1;
+}
+
+message TokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+}
+
+message RefreshRequest {
+  string access_token = 1;
+  string refresh_token = 2;
+}
+
+message RefreshResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  bool ip_changed = 3;
+}
