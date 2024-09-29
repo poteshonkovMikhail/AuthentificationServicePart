@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -26,11 +27,12 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 		return err
 	}
 
-	// Подумать над этим ↓
+	// Установка срока действия Refresh-токена
+	expiresAt := time.Now().Add(2 * 24 * time.Hour)
 	_, err = db.Exec(
 		context.Background(),
-		"INSERT INTO medods_refresh_tokens_storage(user_guid, token_hash, client_ip) VALUES($1, $2, $3)",
-		userGUID, hashedToken, clientIP.String(),
+		"INSERT INTO refresh_tokens(user_guid, token_hash, client_ip, expires_at) VALUES($1, $2, $3, $4)",
+		userGUID, hashedToken, clientIP.String(), expiresAt,
 	)
 	return err
 }
@@ -39,15 +41,20 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, error) {
 	var tokenHash string
 	var clientIPStr string
+	var expiresAt time.Time
 
-	// Подумать над этим ↓
 	err := db.QueryRow(
 		context.Background(),
-		"SELECT token_hash, client_ip FROM medods_refresh_tokens_storage WHERE user_guid=$1",
+		"SELECT token_hash, client_ip, expires_at FROM refresh_tokens WHERE user_guid=$1",
 		userGUID,
-	).Scan(&tokenHash, &clientIPStr)
+	).Scan(&tokenHash, &clientIPStr, &expiresAt)
 	if err != nil {
 		return false, nil, err
+	}
+
+	// Проверяем, не истек ли токен
+	if time.Now().After(expiresAt) {
+		return false, nil, nil
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(tokenHash), []byte(refreshToken))
