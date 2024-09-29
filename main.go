@@ -4,14 +4,27 @@ import (
 	"context"
 	"log"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 )
+
+var db *pgx.Conn
+
+func initDB() {
+	var err error
+	db, err = pgx.Connect(context.Background(), "postgresql://user:password@localhost:5432/authdb")
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v\n", err)
+	}
+}
 
 // Инициализация маршрутов и запуск сервера
 func main() {
-	InitDB()
+	initDB()
 	defer db.Close(context.Background())
 
-	http.HandleFunc("/auth/token", someHandlerFunc)
+	// Подумать над этим ↓
+	http.HandleFunc("/auth/token", tokenHandler)
 	http.HandleFunc("/auth/refresh", someHandlerFunc)
 
 	log.Println("Сервер запущен на порту :8080")
