@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
-	"math/rand"
 	"net"
 
 	"golang.org/x/crypto/bcrypt"
@@ -29,7 +29,7 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 	// Подумать над этим ↓
 	_, err = db.Exec(
 		context.Background(),
-		"INSERT INTO refresh_tokens(user_guid, token_hash, client_ip) VALUES($1, $2, $3)",
+		"INSERT INTO medods_refresh_tokens_storage(user_guid, token_hash, client_ip) VALUES($1, $2, $3)",
 		userGUID, hashedToken, clientIP.String(),
 	)
 	return err
@@ -43,7 +43,7 @@ func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, e
 	// Подумать над этим ↓
 	err := db.QueryRow(
 		context.Background(),
-		"SELECT token_hash, client_ip FROM refresh_tokens WHERE user_guid=$1",
+		"SELECT token_hash, client_ip FROM medods_refresh_tokens_storage WHERE user_guid=$1",
 		userGUID,
 	).Scan(&tokenHash, &clientIPStr)
 	if err != nil {
