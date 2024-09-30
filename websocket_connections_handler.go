@@ -12,18 +12,34 @@ import (
 	"auth_service_part/protobuf/protobuf_generated/auth_protobuf"
 )
 
-var upgrader = websocket.Upgrader{}
-
-func tokenHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		http.Error(w, "Не удалось открыть websocket соединение", http.StatusBadRequest)
-		return
-	}
-	go handleTokenConnection(conn)
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Задаем, что принимаем запросы с любого источника
+	},
 }
 
-func handleTokenConnection(conn *websocket.Conn) {
+func tokenHandler(w http.ResponseWriter, r *http.Request) {
+
+	params := r.URL.Query()
+	userGuid := params.Get("userGuid") // Пример получения значения параметра user_id
+
+	// Убедитесь, что соединение имеет правильные заголовки
+	if r.Header.Get("Upgrade") != "websocket" || r.Header.Get("Connection") != "Upgrade" {
+		http.Error(w, "Invalid websocket connection", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Ошибка при обновлении соединения: %v", err)
+		return
+	}
+
+	// Передача управления в фоновую горутину для обработки веб-сокета
+	go handleTokenConnection(conn, userGuid)
+}
+
+func handleTokenConnection(conn *websocket.Conn, userGuid string) {
 	defer conn.Close()
 
 	for {
@@ -34,6 +50,7 @@ func handleTokenConnection(conn *websocket.Conn) {
 		}
 
 		var req auth_protobuf.TokenRequest
+		//req.UserGuid = userGuid
 		err = proto.Unmarshal(message, &req)
 		if err != nil {
 			log.Printf("Ошибка при демаршалировании параметров запроса: %v", err)

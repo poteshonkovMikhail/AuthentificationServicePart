@@ -22,6 +22,7 @@ func generateRefreshToken() (string, error) {
 
 // Хэширование ---> Сохранение в БД Refresh-токена
 func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) error {
+	// исправить
 	hashedToken, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -29,6 +30,7 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 
 	// Установка срока действия Refresh-токена
 	expiresAt := time.Now().Add(2 * 24 * time.Hour)
+
 	_, err = db.Exec(
 		context.Background(),
 		"INSERT INTO refresh_tokens(user_guid, token_hash, client_ip, expires_at) VALUES($1, $2, $3, $4)",
