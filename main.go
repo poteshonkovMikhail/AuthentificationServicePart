@@ -36,8 +36,8 @@ func main() {
 	http.HandleFunc("/auth/token", tokenHandler)
 	http.HandleFunc("/auth/refresh", refreshHandler)
 
-	log.Println("Сервер запущен на порту :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(os.Getenv("SERVER_ADDRESS"), nil); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
+	log.Println("Сервер запущен на порту :8080")
 }

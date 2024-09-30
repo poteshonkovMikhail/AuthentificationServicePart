@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
@@ -13,10 +12,11 @@ import (
 
 	// Свои пакеты
 	"auth_service_part/email_warning"
+	"auth_service_part/helpers"
 	"auth_service_part/protobuf/protobuf_generated/auth_protobuf"
 )
 
-var refreshTokenRotation_A_R = os.Getenv("REFRESH_TOKEN_ROTATION_A_R")
+var refreshTokenRotation_A_R = helpers.GetEnvAsBool("REFRESH_TOKEN_ROTATION_A_R", false)
 
 func refreshHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -86,7 +86,7 @@ func handleRefreshConnection(conn *websocket.Conn) {
 		// Возможность устанавливать тип ротации Refresh-токена через переменную окружения REFRESH_TOKEN_ROTATION_A_R
 		// если FALSE --- Выдается новый только Access-токен, Refresh-токен остается прежним
 		// если TRUE --- Выдаются новые Refresh- и Access- токены
-		if refreshTokenRotation_A_R == "FALSE" {
+		if !refreshTokenRotation_A_R {
 
 			resp := &auth_protobuf.RefreshResponse{
 				AccessToken:  accessToken,
