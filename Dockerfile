@@ -13,6 +13,6 @@ FROM gcr.io/distroless/base
 
 COPY --from=builder /app/main /main
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 CMD ["/main"]

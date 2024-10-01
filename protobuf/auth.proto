@@ -1,7 +1,10 @@
 syntax = "proto3";
 
 package auth_protobuf;
+
 option go_package = "./protobuf_generated/auth_protobuf";
+
+import "google/api/annotations.proto";
 
 message TokenRequest {
   string user_guid = 1;
@@ -21,4 +24,18 @@ message RefreshResponse {
   string access_token = 1;
   string refresh_token = 2;
   bool ip_changed = 3;
+}
+
+service AuthService {
+  rpc GetToken(TokenRequest) returns (TokenResponse) {
+    option (google.api.http) = {
+      get: "/auth/token"
+    };
+  }
+
+  rpc OperationRefreshTokens(RefreshRequest) returns (RefreshResponse) {
+    option (google.api.http) = {
+      get: "/auth/refresh"
+    };
+  }
 }

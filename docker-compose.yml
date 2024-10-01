@@ -4,7 +4,8 @@ services:
   api:
     build: .
     ports:
-      - "8080:8080"
+      - "8080:8080"  # Порт для gRPC-Gateway
+      - "9090:9090"  # Порт для gRPC сервера
     env_file:
       - .env
     depends_on:
