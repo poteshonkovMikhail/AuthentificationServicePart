@@ -42,7 +42,11 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 		"INSERT INTO refresh_tokens(user_guid, token_hash, client_ip, expires_at) VALUES($1, $2, $3, $4)",
 		userGUID, hashedToken, clientIP.String(), expiresAt,
 	)
-	return fmt.Errorf("11111111111111 %v", err)
+	if err != nil {
+		return fmt.Errorf("11111111111111 %v", err)
+	}
+
+	return nil
 }
 
 // Валидация Refresh-токена
