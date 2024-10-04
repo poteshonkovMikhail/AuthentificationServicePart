@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/peer"
@@ -37,7 +38,7 @@ func (s *AuthServer) GetToken(ctx context.Context, req *auth_protobuf.TokenReque
 		return nil, err
 	}
 
-	refreshToken, err := generateRefreshToken()
+	refreshToken, err := generateRefreshToken(userGuid, ip)
 	if err != nil {
 		log.Printf("Ошибка при попытке генерации Refresh-токена: %v", err)
 		return nil, err
@@ -46,7 +47,7 @@ func (s *AuthServer) GetToken(ctx context.Context, req *auth_protobuf.TokenReque
 	err = storeRefreshToken(userGuid, refreshToken, ip)
 	if err != nil {
 		log.Printf("Ошибка при попытке хэширования или отправки в БД Refresh-токена: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("ошибка операции")
 	}
 
 	resp := &auth_protobuf.TokenResponse{
@@ -56,7 +57,74 @@ func (s *AuthServer) GetToken(ctx context.Context, req *auth_protobuf.TokenReque
 	return resp, nil
 }
 
-func (s *AuthServer) OperationThatRefreshTokens(ctx context.Context, req *auth_protobuf.RefreshRequest) (*auth_protobuf.RefreshResponse, error) {
+func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_protobuf.RefreshRequest) (*auth_protobuf.RefreshResponse, error) {
+	// Проверка структуры Access-токена
+	if req.AccessToken == "" {
+
+		// Декодирование Refresh-токена
+		decodedUserGUID, decodedIP, err := decodeRefreshToken(req.RefreshToken, []byte("Medods_Secret_Key_Tw2h3hdyr84hgr"))
+		if err != nil {
+			fmt.Println("Ошибка при попытке декодировать Refresh-токен:", err)
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+
+		currentIP := net.ParseIP(decodedIP.String())
+
+		isValid, storedIP, err := validateRefreshToken(decodedUserGUID, req.RefreshToken)
+		if err != nil || !isValid {
+			log.Printf("Недействительный Refresh-токен")
+			return nil, fmt.Errorf("недействительный Refresh-токен: %v", err)
+		}
+
+		ipChanged := !currentIP.Equal(storedIP)
+
+		if ipChanged {
+			email_warning.SendEmailWarning(decodedUserGUID)
+		}
+
+		accessToken, err := generateAccessToken(decodedUserGUID, currentIP)
+		if err != nil {
+			log.Printf("Ошибка при попытке сгенерировать новый Access-токен: %v", err)
+			return nil, err
+		}
+
+		if !refreshTokenRotation_A_R {
+			resp := &auth_protobuf.RefreshResponse{
+				AccessToken:  accessToken,
+				RefreshToken: req.RefreshToken,
+				IpChanged:    ipChanged,
+			}
+			return resp, nil
+		} else {
+			refreshToken, err := generateRefreshToken(decodedUserGUID, currentIP)
+			if err != nil {
+				log.Printf("Ошибка при попытке сгенерировать новый Refresh-токен: %v", err)
+				return nil, err
+			}
+
+			removeNonValidToken(decodedUserGUID)
+
+			err = storeRefreshToken(decodedUserGUID, refreshToken, currentIP)
+			if err != nil {
+				log.Printf("Ошибка при хэшировании или сохранении в БД нового Refresh-токена: %v", err)
+				return nil, fmt.Errorf("ошибка операции")
+			}
+
+			resp := &auth_protobuf.RefreshResponse{
+				AccessToken:  accessToken,
+				RefreshToken: refreshToken,
+				IpChanged:    ipChanged,
+			}
+			return resp, nil
+		}
+	}
+
+	parts := strings.Split(req.AccessToken, ".")
+	if len(parts) != 3 {
+		log.Printf("Неверная структура токена: %v", req.AccessToken)
+		return nil, fmt.Errorf("неверная структура токена")
+	}
+
 	token, err := jwt.Parse(req.AccessToken, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -76,6 +144,11 @@ func (s *AuthServer) OperationThatRefreshTokens(ctx context.Context, req *auth_p
 	}
 
 	userGUID := claims["user_guid"].(string)
+	if userGUID == "" {
+		log.Printf("User GUID не может быть пустым")
+		return nil, fmt.Errorf("неверный User GUID")
+	}
+
 	currentIP := net.ParseIP(claims["client_ip"].(string))
 
 	isValid, storedIP, err := validateRefreshToken(userGUID, req.RefreshToken)
@@ -104,16 +177,18 @@ func (s *AuthServer) OperationThatRefreshTokens(ctx context.Context, req *auth_p
 		}
 		return resp, nil
 	} else {
-		refreshToken, err := generateRefreshToken()
+		refreshToken, err := generateRefreshToken(userGUID, currentIP)
 		if err != nil {
 			log.Printf("Ошибка при попытке сгенерировать новый Refresh-токен: %v", err)
 			return nil, err
 		}
 
+		removeNonValidToken(userGUID)
+
 		err = storeRefreshToken(userGUID, refreshToken, currentIP)
 		if err != nil {
 			log.Printf("Ошибка при хэшировании или сохранении в БД нового Refresh-токена: %v", err)
-			return nil, err
+			return nil, fmt.Errorf("ошибка операции")
 		}
 
 		resp := &auth_protobuf.RefreshResponse{

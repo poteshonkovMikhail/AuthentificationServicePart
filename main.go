@@ -49,15 +49,18 @@ func main() {
 	initDB()
 	defer db.Close(context.Background())
 
+	// Запуск горутины для удаления истекших токенов
+	go removeExpiredTokens()
+
 	// Создаем gRPC сервер
 	grpcServer := grpc.NewServer()
 	authService := &AuthServer{}
 	auth_protobuf.RegisterAuthServiceServer(grpcServer, authService)
 
-	// Включаем reflection для gRPC сервера (опционально)
+	// Подключение reflection (рефлексию) для grpc-сервера
 	reflection.Register(grpcServer)
 
-	// Запускаем gRPC сервер
+	// Запуск gRPC сервера
 	go func() {
 		lis, err := net.Listen("tcp", ":9090")
 		if err != nil {
@@ -69,7 +72,7 @@ func main() {
 		}
 	}()
 
-	// Создаем gRPC-Gateway
+	// Создание gRPC-Gateway
 	ctx := context.Background()
 
 	ctx, cancel := context.WithCancel(ctx)
