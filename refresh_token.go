@@ -66,7 +66,6 @@ func hashToken(refreshToken string) (string, error) {
 
 // Сохранение токена в БД
 func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) error {
-	log.Println(refreshToken)
 
 	hashedToken, err := hashToken(refreshToken)
 	if err != nil {
@@ -111,7 +110,6 @@ func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, e
 
 	hashChunks := strings.Split(tokenHash, "|")
 	tokenChunks := strings.Split(updatedRefreshToken, "|")
-	log.Println(updatedRefreshToken)
 
 	if len(hashChunks) != len(tokenChunks) {
 		return false, nil, errors.New("invalid token structure")
@@ -139,7 +137,7 @@ func parseRefreshToken(refreshToken string) (string, net.IP, error) {
 		return "", nil, fmt.Errorf("ошибка декодирования userGUID: %v", err)
 	}
 	userGUID := string(userGUIDBytes)
-	log.Println(userGUID)
+
 	clientIPBytes, err := base64.StdEncoding.DecodeString(chunks[2])
 	if err != nil {
 		return "", nil, fmt.Errorf("ошибка декодирования clientIP: %v", err)

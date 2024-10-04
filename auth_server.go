@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
 	// Свои пакеты
@@ -56,20 +57,54 @@ func (s *AuthServer) GetToken(ctx context.Context, req *auth_protobuf.TokenReque
 	}
 	return resp, nil
 }
+func extractAccessToken(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("нет метаданных в контексте")
+	}
+
+	authHeader, ok := md["authorization"]
+	if !ok || len(authHeader) == 0 {
+		return "", fmt.Errorf("нет заголовка авторизации")
+	}
+
+	parts := strings.SplitN(authHeader[0], " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return "", fmt.Errorf("неверный формат заголовка авторизации")
+	}
+
+	return parts[1], nil
+}
 
 func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_protobuf.RefreshRequest) (*auth_protobuf.RefreshResponse, error) {
-	// Проверка структуры Access-токена
-	if req.AccessToken == "" {
+
+	accessToken, err := extractAccessToken(ctx)
+	if err != nil {
+		log.Printf("Ошибка извлечения токена: %v", err)
+		return nil, fmt.Errorf("ошибка авторизации: %v", err)
+	}
+
+	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte("Medods_Secret_Key"), nil
+	})
+
+	if err != nil || !token.Valid {
+		log.Printf("Недействительный Access-токен, пробуем обновить...")
+
+		// Попытка обновления Access-токена
 
 		userGUID, currentIP, err := parseRefreshToken(req.RefreshToken)
 		if err != nil {
-			log.Printf("Ошибка парсинга Refresh-токена: %v", err)
-			return nil, fmt.Errorf("что-то пошло не так при обработке вашего Refresh-токена: %v", err)
+			log.Printf("Ошибка при парсинге Refresh-токена")
+			return nil, fmt.Errorf("не удалось прочитать Refresh-токен: %v", err)
 		}
 
 		isValid, storedIP, err := validateRefreshToken(userGUID, req.RefreshToken)
 		if err != nil || !isValid {
-			log.Printf("Недействительный Refresh-токен: %v", err)
+			log.Printf("Недействительный Refresh-токен")
 			return nil, fmt.Errorf("недействительный Refresh-токен: %v", err)
 		}
 
@@ -79,7 +114,7 @@ func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_proto
 			email_warning.SendEmailWarning(userGUID)
 		}
 
-		accessToken, err := generateAccessToken(userGUID, currentIP)
+		accessToken, err = generateAccessToken(userGUID, currentIP)
 		if err != nil {
 			log.Printf("Ошибка при попытке сгенерировать новый Access-токен: %v", err)
 			return nil, err
@@ -116,24 +151,7 @@ func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_proto
 		}
 	}
 
-	parts := strings.Split(req.AccessToken, ".")
-	if len(parts) != 3 {
-		log.Printf("Неверная структура токена: %v", req.AccessToken)
-		return nil, fmt.Errorf("неверная структура токена")
-	}
-
-	token, err := jwt.Parse(req.AccessToken, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return []byte("Medods_Secret_Key"), nil
-	})
-
-	if err != nil || !token.Valid {
-		log.Printf("Недействительный Access-токен")
-		return nil, fmt.Errorf("недействительный Access-токен: %v", err)
-	}
-
+	// Если токен валиден, продолжаем проверку.
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		log.Printf("Недействительные данные токена")
@@ -160,7 +178,7 @@ func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_proto
 		email_warning.SendEmailWarning(userGUID)
 	}
 
-	accessToken, err := generateAccessToken(userGUID, currentIP)
+	accessToken, err = generateAccessToken(userGUID, currentIP)
 	if err != nil {
 		log.Printf("Ошибка при попытке сгенерировать новый Access-токен: %v", err)
 		return nil, err
