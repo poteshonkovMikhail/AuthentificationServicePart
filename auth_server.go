@@ -61,28 +61,25 @@ func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_proto
 	// Проверка структуры Access-токена
 	if req.AccessToken == "" {
 
-		// Декодирование Refresh-токена
-		decodedUserGUID, decodedIP, err := decodeRefreshToken(req.RefreshToken, []byte("Medods_Secret_Key_Tw2h3hdyr84hgr"))
+		userGUID, currentIP, err := parseRefreshToken(req.RefreshToken)
 		if err != nil {
-			fmt.Println("Ошибка при попытке декодировать Refresh-токен:", err)
-			return nil, fmt.Errorf("unexpected signing method")
+			log.Printf("Ошибка парсинга Refresh-токена: %v", err)
+			return nil, fmt.Errorf("что-то пошло не так при обработке вашего Refresh-токена: %v", err)
 		}
 
-		currentIP := net.ParseIP(decodedIP.String())
-
-		isValid, storedIP, err := validateRefreshToken(decodedUserGUID, req.RefreshToken)
+		isValid, storedIP, err := validateRefreshToken(userGUID, req.RefreshToken)
 		if err != nil || !isValid {
-			log.Printf("Недействительный Refresh-токен")
+			log.Printf("Недействительный Refresh-токен: %v", err)
 			return nil, fmt.Errorf("недействительный Refresh-токен: %v", err)
 		}
 
 		ipChanged := !currentIP.Equal(storedIP)
 
 		if ipChanged {
-			email_warning.SendEmailWarning(decodedUserGUID)
+			email_warning.SendEmailWarning(userGUID)
 		}
 
-		accessToken, err := generateAccessToken(decodedUserGUID, currentIP)
+		accessToken, err := generateAccessToken(userGUID, currentIP)
 		if err != nil {
 			log.Printf("Ошибка при попытке сгенерировать новый Access-токен: %v", err)
 			return nil, err
@@ -96,15 +93,15 @@ func (s *AuthServer) OperationRefreshTokens(ctx context.Context, req *auth_proto
 			}
 			return resp, nil
 		} else {
-			refreshToken, err := generateRefreshToken(decodedUserGUID, currentIP)
+			refreshToken, err := generateRefreshToken(userGUID, currentIP)
 			if err != nil {
 				log.Printf("Ошибка при попытке сгенерировать новый Refresh-токен: %v", err)
 				return nil, err
 			}
 
-			removeNonValidToken(decodedUserGUID)
+			removeNonValidToken(userGUID)
 
-			err = storeRefreshToken(decodedUserGUID, refreshToken, currentIP)
+			err = storeRefreshToken(userGUID, refreshToken, currentIP)
 			if err != nil {
 				log.Printf("Ошибка при хэшировании или сохранении в БД нового Refresh-токена: %v", err)
 				return nil, fmt.Errorf("ошибка операции")

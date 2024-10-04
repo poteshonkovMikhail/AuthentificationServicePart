@@ -25,12 +25,11 @@ func removeExpiredTokens() {
 }
 
 func removeNonValidToken(userGuid string) {
-	// Удаление истекших токенов
 	_, err := db.Exec(context.Background(),
 		"DELETE FROM refresh_tokens WHERE user_guid = $1", userGuid)
 	if err != nil {
-		log.Printf("Ошибка при удалении истекших токенов: %v\n", err)
+		log.Printf("Ошибка при удалении Refresh-токена: %v\n", err)
 	} else {
-		log.Println("Истекшие Refresh-токены успешно удалены")
+		log.Println("Успешное удаление Refresh-токена")
 	}
 }

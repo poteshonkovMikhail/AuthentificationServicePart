@@ -2,20 +2,22 @@ package main
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	SaltSize     = 72
+	GUIDSize     = 72
+	ClientIPSize = 72
 )
 
 // Генерация случайной строки
@@ -28,90 +30,49 @@ func generateRandomBytes(n int) ([]byte, error) {
 	return bytes, nil
 }
 
-// Шифрование данных
-func encrypt(data string, key []byte) (string, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
-	}
-
-	ciphertext := gcm.Seal(nonce, nonce, []byte(data), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
 // Генерация Refresh-токена
 func generateRefreshToken(userGUID string, clientIP net.IP) (string, error) {
-	secret := []byte("Medods_Secret_Key_Tw2h3hdyr84hgr")
-
-	randomBytes, err := generateRandomBytes(32)
+	// Генерация случайной соли
+	randomBytes, err := generateRandomBytes(SaltSize)
 	if err != nil {
 		return "", err
 	}
+	salt := base64.StdEncoding.EncodeToString(randomBytes)[:SaltSize]
+	userGUID = base64.StdEncoding.EncodeToString([]byte(userGUID))
+	clientIPEncode := base64.StdEncoding.EncodeToString([]byte(clientIP.String()))
 
-	encryptedData_1, err := encrypt(userGUID, secret)
-	if err != nil {
-		return "", err
-	}
-
-	encryptedData_2, err := encrypt(clientIP.String(), secret)
-	if err != nil {
-		return "", err
-	}
-
-	refreshToken := fmt.Sprintf("%s.%s.%s", base64.StdEncoding.EncodeToString(randomBytes), encryptedData_1, encryptedData_2)
-
+	refreshToken := fmt.Sprintf("%s|%s|%s", salt, userGUID, clientIPEncode)
+	log.Println(refreshToken)
 	return refreshToken, nil
 }
 
-// Разделение строки Refresh-токена на части
-func chunkString(s string, chunkSize int) []string {
-	var chunks []string
-	for len(s) > 0 {
-		if len(s) < chunkSize {
-			chunks = append(chunks, s)
-			break
-		}
-		chunks = append(chunks, s[:chunkSize])
-		s = s[chunkSize:]
-	}
-	return chunks
-}
-
-// Хэширование Refresh-токена с использованием соли
 func hashToken(refreshToken string) (string, error) {
-	chunks := strings.Split(refreshToken, ".")
+	chunks := strings.Split(refreshToken, "|")
+	if len(chunks) != 3 {
+		return "", errors.New("недопустимая структура токена")
+	}
+
 	var hashedTokens []string
-
 	for _, chunk := range chunks {
-
 		hashedChunk, err := bcrypt.GenerateFromPassword([]byte(chunk), bcrypt.DefaultCost)
 		if err != nil {
 			return "", err
 		}
-		hashedTokens = append(hashedTokens, fmt.Sprintf("$%s", base64.StdEncoding.EncodeToString(hashedChunk)))
+		hashedTokens = append(hashedTokens, string(hashedChunk)) // Изменим тут
 	}
 
-	return strings.Join(hashedTokens, ""), nil
+	return strings.Join(hashedTokens, "|"), nil // изменение тут
 }
 
-// Хэширование ---> Сохранение в БД Refresh-токена
+// Сохранение токена в БД
 func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) error {
+	log.Println(refreshToken)
+
 	hashedToken, err := hashToken(refreshToken)
 	if err != nil {
 		return fmt.Errorf("ошибка хэширования токена: %v", err)
 	}
 
-	// Установка срока действия Refresh-токена
 	expiresAt := time.Now().Add(2 * 24 * time.Hour)
 
 	_, err = db.Exec(
@@ -126,7 +87,7 @@ func storeRefreshToken(userGUID string, refreshToken string, clientIP net.IP) er
 	return nil
 }
 
-// Валидация Refresh-токена
+// Валидация токена
 func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, error) {
 	var tokenHash string
 	var clientIPStr string
@@ -141,31 +102,24 @@ func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, e
 		return false, nil, err
 	}
 
-	// Проверяем, не истек ли токен
 	if time.Now().After(expiresAt) {
+		removeNonValidToken(userGUID)
 		return false, nil, nil
 	}
 
-	// Валидация каждого блока
-	chunks := strings.Split(tokenHash, "$")
-	refreshTokens := strings.Split(refreshToken, ".")
+	updatedRefreshToken := strings.ReplaceAll(refreshToken, " ", "+")
 
-	log.Println(chunks)
+	hashChunks := strings.Split(tokenHash, "|")
+	tokenChunks := strings.Split(updatedRefreshToken, "|")
+	log.Println(updatedRefreshToken)
 
-	for i, chunk := range chunks {
-		if chunk == "" {
-			continue // Пропускаем пустые блоки
-		}
+	if len(hashChunks) != len(tokenChunks) {
+		return false, nil, errors.New("invalid token structure")
+	}
 
-		// Декодируем хэш
-		hashedChunk, err := base64.StdEncoding.DecodeString(chunk) // Пропускаем символ '$'
-		if err != nil {
-			return false, nil, fmt.Errorf("ошибка декодирования хэша: %v", err)
-		}
-
-		// Сравниваем хэш с соответствующим блоком токена
-		if err := bcrypt.CompareHashAndPassword(append([]byte("$"), hashedChunk...), []byte(refreshTokens[i])); err != nil {
-			return false, nil, err // Токен недействителен
+	for i, hashedChunk := range hashChunks {
+		if err := bcrypt.CompareHashAndPassword([]byte(hashedChunk), []byte(tokenChunks[i])); err != nil {
+			return false, nil, err
 		}
 	}
 
@@ -173,63 +127,28 @@ func validateRefreshToken(userGUID string, refreshToken string) (bool, net.IP, e
 	return true, clientIP, nil
 }
 
-// Дешифрование данных AES
-func decrypt(token string, key []byte) (string, error) {
-	ciphertext, err := base64.StdEncoding.DecodeString(token)
+// Парсинг Payload'a Refresh-токена
+func parseRefreshToken(refreshToken string) (string, net.IP, error) {
+	chunks := strings.Split(refreshToken, "|")
+	if len(chunks) != 3 {
+		return "", nil, errors.New("недопустимая структура токена")
+	}
+
+	userGUIDBytes, err := base64.StdEncoding.DecodeString(chunks[1])
 	if err != nil {
-		return "", err
+		return "", nil, fmt.Errorf("ошибка декодирования userGUID: %v", err)
 	}
-
-	block, err := aes.NewCipher(key)
+	userGUID := string(userGUIDBytes)
+	log.Println(userGUID)
+	clientIPBytes, err := base64.StdEncoding.DecodeString(chunks[2])
 	if err != nil {
-		return "", err
+		return "", nil, fmt.Errorf("ошибка декодирования clientIP: %v", err)
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		return "", errors.New("ciphertext too short")
-	}
-
-	nonce, ciphertext := ciphertext[:aes.BlockSize], ciphertext[aes.BlockSize:]
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", err
-	}
-
-	return string(plaintext), nil
-}
-
-// Расшифровка Refresh-токена
-func decodeRefreshToken(refreshToken string, key []byte) (string, net.IP, error) {
-	parts := strings.Split(refreshToken, ".")
-	if len(parts) != 2 {
-		return "", nil, errors.New("invalid token format")
-	}
-
-	encryptedData := parts[1]
-
-	decryptedData, err := decrypt(encryptedData, key)
-	if err != nil {
-		return "", nil, err
-	}
-
-	var data struct {
-		UserGUID string `json:"user_guid"`
-		ClientIP string `json:"client_ip"`
-	}
-	if err := json.Unmarshal([]byte(decryptedData), &data); err != nil {
-		return "", nil, err
-	}
-
-	clientIP := net.ParseIP(data.ClientIP)
+	clientIP := net.ParseIP(string(clientIPBytes))
 	if clientIP == nil {
-		return "", nil, errors.New("invalid IP format")
+		return "", nil, fmt.Errorf("не удалось распознать IP-адрес из: %s", string(clientIPBytes))
 	}
 
-	return data.UserGUID, clientIP, nil
+	return userGUID, clientIP, nil
 }
